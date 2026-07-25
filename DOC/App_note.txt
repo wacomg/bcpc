@@ -1,0 +1,455 @@
+================================================================================
+                    CAN APPLICATION NOTE - ENGLISH SUMMARY
+================================================================================
+
+1.  Typical Network Diagram
+2.  DCH Software Settings
+3.  Protocol Command Format
+4.  Drive Zeroing Mode Operation
+5.  Drive Position Mode Operation
+6.  Drive Speed Mode Operation
+7.  Drive Torque Mode Operation
+8.  Fault Reset
+9.  Node Timeout Protection, Heartbeat Upload
+10. PDO Mapping Example
+11. Save PDO Mapping
+12. Schedule I, Schedule II and List of Commonly Used Addresses
+
+================================================================================
+1. TYPICAL NETWORK DIAGRAM
+================================================================================
+
+- Total CAN bus resistance: 60 Ohm
+- If the first drive has internal termination, no external resistor is needed.
+
+Drive CAN Port Definition:
+- CAN_H, CAN_L, GND
+
+================================================================================
+2. DCH SOFTWARE CONFIGURATION
+================================================================================
+
+- Set drive to CANopen control mode using the Basic Wizard.
+- Download settings to flash after configuration.
+
+Baud Rate and Node ID Settings:
+- Select "CAN" → choose baud rate → set node ID → "Save & Reset".
+- Baud rate must match the master.
+
+================================================================================
+3. PROTOCOL COMMAND FORMAT
+================================================================================
+
+3.1 NMT Protocol
+----------------
+Command format: COB-ID = 0x000, Data = [command] [nodeID]
+
+Commands:
+- Enter Operational:       01 nodeID
+- Enter Stop:              02 nodeID
+- Enter Pre-operational:   80 nodeID
+- Reset Application:       81 nodeID
+- Reset Communication:     82 nodeID
+
+Note: nodeID = 0 means all nodes.
+
+Example:
+- Node 0x06 to Operational:  000 01 06
+- All nodes to Pre-op:       000 80 00
+
+3.2 Nodeguard Protocol
+----------------------
+Master sends: 0x700 + nodeID (remote frame)
+Slave responds with status byte (toggle bit + state):
+- 4 = Stopped
+- 5 = Operational
+- 0x7F = Pre-operational
+Toggle bit alternates 0,1,0,1...
+
+3.3 Heartbeat Protocol
+----------------------
+Slave periodically sends status frame:
+- 4 = Stopped
+- 5 = Operational
+- 0x7F = Pre-operational
+
+3.4 SDO Protocol
+----------------
+Read Command (Master):
+COB-ID: 0x600 + nodeID
+Data: 40 [index low] [index high] [subindex] 00 00 00 00
+
+Slave Response (success):
+- 1 byte:  4F ... d1 xx xx
+- 2 bytes: 4B ... d1 d0 xx
+- 3 bytes: 47 ... d2 d1 d0
+- 4 bytes: 43 ... d3 d2 d1 d0
+
+Error response: 80 + SDO abort code.
+
+Write Command (Master):
+- 1 byte:  2F [idx] [sub] d0 00 00 00
+- 2 bytes: 2B [idx] [sub] d1 d0 00 00
+- 3 bytes: 27 [idx] [sub] d2 d1 d0 00
+- 4 bytes: 23 [idx] [sub] d3 d2 d1 d0
+
+Slave response:
+- Success: 60 00 00 00 00
+- Failure: 80 + abort code
+
+3.5 SYNC Protocol
+-----------------
+COB-ID: 0x80, Data: 00
+
+================================================================================
+4. MOTOR ZERO RETURN SETTING
+================================================================================
+
+Example: External NPN switch connected to IN4 as home.
+
+Steps:
+1. Configure homing method in DCH software.
+2. Set homing speeds and acceleration.
+3. Save to flash.
+4. Enter CAN operation mode:
+   COB-ID: 0x000, Data: 01 xx  (xx = nodeID, 00 for all)
+   Then: 01 00 to enter operational.
+
+5. Select homing mode:
+   COB-ID: 0x60x, Data: 2F 60 60 00 06 00 00 00
+
+6. Enable drive:
+   COB-ID: 0x60x, Data: 2B 40 60 00 0F 00 00 00
+
+7. Start homing:
+   COB-ID: 0x60x, Data: 2B 40 60 00 1F 00 00 00
+
+================================================================================
+5. POSITION CONTROL MODE
+================================================================================
+
+Encoder: 2500 lines, quadrupled → 10000 counts/rev.
+Resolution: 0.1 count/s.
+
+Steps:
+1. Enter operational: 000 01 00
+
+2. Set mode to position:
+   COB-ID: 0x60x, Data: 2F 60 60 00 01 00 00 00
+
+3. Set speed (0.1 count/s):
+   Address 0x6081.
+   Example for 1000 RPM:
+   COB-ID: 0x60x, Data: 23 81 60 00 60 54 19 00
+   (0x195460 = 1666666 counts/min = 1000 RPM)
+
+4. Set acceleration (10 count/s²):
+   Address 0x6083.
+   COB-ID: 0x60x, Data: 23 83 60 00 A0 86 01 00  (100 r/s²)
+
+5. Set deceleration (10 count/s²):
+   Address 0x6084.
+
+6. Set target position (1 count):
+   Address 0x607A.
+   Example +10000 counts:
+   COB-ID: 0x60x, Data: 23 7A 60 00 10 27 00 00
+
+7. Trigger:
+   COB-ID: 0x60x, Data: 2B 40 60 00 0F 00 00 00
+   Then: 2B 40 60 00 5F 00 00 00  (relative move)
+   (Absolute: 1F)
+
+8. Read position:
+   Address 0x6064.
+   COB-ID: 0x60x, Data: 40 64 60 00 00 00 00 00
+
+================================================================================
+6. SPEED CONTROL MODE
+================================================================================
+
+1. Enter operational: 000 01 00
+
+2. Set speed mode:
+   COB-ID: 0x60x, Data: 2F 60 60 00 03 00 00 00
+
+3. Enable:
+   COB-ID: 0x60x, Data: 2B 40 60 00 0F 00 00 00
+
+4. Set speed (0.1 count/s):
+   Address 0x60FF.
+   Example +1000 RPM:
+   COB-ID: 0x60x, Data: 23 FF 60 00 6A 6E 19 00
+   Example -1000 RPM:
+   COB-ID: 0x60x, Data: 23 FF 60 00 96 91 E6 FF
+
+5. Disable:
+   COB-ID: 0x60x, Data: 2B 40 60 00 00 00 00 00
+
+6. Read speed:
+   Address 0x6069.
+   COB-ID: 0x60x, Data: 40 69 60 00 00 00 00 00
+
+================================================================================
+7. TORQUE CONTROL MODE
+================================================================================
+
+1. Enter operational: 000 01 00
+
+2. Set torque mode:
+   COB-ID: 0x60x, Data: 2F 60 60 00 04 00 00 00
+
+3. Enable:
+   COB-ID: 0x60x, Data: 2B 40 60 00 0F 00 00 00
+
+4. Set current rise rate (mA/s):
+   COB-ID: 0x60x, Data: 23 13 21 00 10 27 00 00  (10000 mA/s)
+
+5. Set running current (0.01A):
+   Address 0x2350.
+   COB-ID: 0x60x, Data: 2B 40 23 50 05 50 00 00  (0.05A)
+
+6. Read actual current:
+   Address 0x221C.
+   COB-ID: 0x60x, Data: 40 1C 22 00 00 00 00 00
+
+================================================================================
+8. FAULT RESET
+================================================================================
+
+Reset all nodes:
+COB-ID: 0x000, Data: 81 00
+
+Reset a specific node (e.g., node 0x06):
+COB-ID: 0x000, Data: 81 06
+
+================================================================================
+9. NODE TIMEOUT PROTECTION & HEARTBEAT UPLOAD
+================================================================================
+
+9.1 Node Timeout Protection
+---------------------------
+Set protection time (0x100C, ms):
+COB-ID: 0x60x, Data: 2B 0C 10 00 FA 00 00 00  (250 ms)
+
+Set protection factor (0x100D):
+COB-ID: 0x60x, Data: 2F 0D 10 00 04 00 00 00  (factor 4)
+
+Total timeout = 250 ms * 4 = 1000 ms.
+Send remote frame to 0x701 to trigger.
+
+9.2 Heartbeat Upload
+--------------------
+Set heartbeat time (0x1017, ms):
+COB-ID: 0x60x, Data: 2B 17 10 00 FA 00 00 00  (250 ms)
+
+Note: Heartbeat and nodeguard cannot be used simultaneously.
+
+================================================================================
+10. PDO MAPPING EXAMPLES
+================================================================================
+
+10.1 RPDO Mapping (Speed)
+-------------------------
+Set COB-ID for RPDO0:
+601 23 00 14 01 02 00 80
+
+Set transmission type (asynchronous):
+601 2F 00 14 02 FF 00 00
+
+Disable PDO 1600:
+601 2F 00 16 00 00 00 00
+
+Map speed (0x60FF) to 1600, subindex 1:
+601 23 00 16 01 20 00 FF 60
+
+Enable PDO 1600:
+601 2F 00 16 00 01 00 00 00
+
+Enable PDO 1400:
+601 23 00 14 01 01 02 00 00
+
+10.2 RPDO Mapping (Mode + Enable)
+---------------------------------
+Set COB-ID for RPDO1:
+601 23 01 14 01 01 03 00 80
+
+Set transmission type (asynchronous):
+601 2F 01 14 02 FF 00 00
+
+Disable PDO 1601:
+601 2F 01 16 00 00 00 00
+
+Map mode (0x6060) to 1601, subindex 1:
+601 23 01 16 01 08 00 60 60
+
+Map control word (0x6040) to 1601, subindex 2:
+601 23 01 16 02 10 00 40 60
+
+Enable PDO 1601:
+601 2F 01 16 00 02 00 00 00
+
+Enable PDO 1401:
+601 23 01 14 01 01 03 00 00
+
+10.3 TPDO (Read Data)
+---------------------
+Disable TPDO 0x1A00:
+60x 2F 00 1A 00 00 00 00
+
+Map speed feedback (0x606C) to 1A00, subindex 1:
+60x 23 00 1A 01 20 00 6C 60
+
+Map status (0x6041) to 1A00, subindex 2:
+60x 23 00 1A 02 10 00 41 60
+
+Set COB-ID for TPDO:
+60x 23 00 18 01 81 01 00 00  (0x181)
+
+Set sync trigger:
+60x 2F 00 18 02 01 00 00 00
+
+Enable TPDO:
+60x 2F 00 1A 00 02 00 00 00
+
+Send SYNC:
+COB-ID: 0x80, Data: 00
+
+Return data format: [4 bytes speed] [2 bytes status]
+
+================================================================================
+11. SAVE PDO MAPPING
+================================================================================
+
+DC Series:
+1. 60x 23 20 24 00 0A 00 00 00
+2. 60x 23 10 10 01 73 61 76 65
+
+DE/DE2 Series:
+1. 60x 2B B3 21 00 00 10 00 00
+2. 60x 23 10 10 01 73 61 76 65
+
+================================================================================
+12. SCHEDULES & COMMON ADDRESSES
+================================================================================
+
+12.1 Schedule I - Control Word (0x6040)
+---------------------------------------
++-------+----------------------------------------------------------+
+| Bit   | Description                                              |
++-------+----------------------------------------------------------+
+| 0     | CAN switch on                                            |
+| 1     | Voltage enable                                           |
+| 2     | Not emergency stop                                       |
+| 3     | Operation enable                                         |
+| 4     | 0->1 instruction execution                               |
+| 5     | 0=wait, 1=immediate (with bit4)                          |
+| 6     | 0=absolute, 1=relative                                   |
+| 7     | 0->1 clear fault                                         |
+| 8     | Instruction abort                                        |
+| 9-15  | Reserved                                                 |
++-------+----------------------------------------------------------+
+
+12.2 Schedule II - Status Word (0x6041)
+---------------------------------------
++-------+----------------------------------------------------------+
+| Bit   | Description                                              |
++-------+----------------------------------------------------------+
+| 0     | CAN allowed to switch on                                 |
+| 1     | CAN switch on                                            |
+| 2     | 1=motor enabled, 0=disabled                              |
+| 3     | Fault (serious)                                          |
+| 4     | Voltage OK                                               |
+| 5     | 0=emergency stop                                         |
+| 6     | CAN stop mode                                            |
+| 7     | Warning (does not affect operation)                      |
+| 8     | Motion command aborted                                   |
+| 9     | 1=remote operation, 0=internal function                  |
+| 10    | Motion instruction complete                              |
+| 11    | Internal control loop limited                            |
+| 12-13 | 12=position mode response / homing response              |
+|       | 13=position following error / homing error               |
+| 14    | Motor running (0 when stopped)                           |
+| 15    | Reserved                                                 |
++-------+----------------------------------------------------------+
+
+12.3 Schedule III - Mode Selection (0x6060)
+-------------------------------------------
++-------+-------------------+
+| Value | Mode              |
++-------+-------------------+
+| 1     | Position          |
+| 3     | Speed             |
+| 4     | Torque            |
+| 6     | Homing            |
++-------+-------------------+
+
+================================================================================
+COMMON ADDRESS LIST
+================================================================================
+
++------------+--------+------+---------------------------------------------+
+| Index (Hex)| Length | RW   | Description                                 |
++------------+--------+------+---------------------------------------------+
+| 100C       | 2      | RW   | Node protection time (ms)                   |
+| 100D       | 1      | RW   | Node protection factor                      |
+| 6040       | 2      | RW   | Control word (Schedule I)                   |
+| 6041       | 2      | R    | Status word (Schedule II)                   |
+| 6060       | 1      | RW   | Mode selection (Schedule III)               |
+| 6061       | 1      | R    | Current operation mode display              |
+| 6064       | 4      | RW   | Actual motor position (counts)              |
+| 6069       | 4      | R    | Actual speed (0.1 counts/s)                 |
+| 607A       | 4      | RW   | Target position (counts)                    |
+| 6081       | 4      | RW   | Speed in position mode (0.1 count/s)        |
+| 6083       | 4      | RW   | Acceleration (10 counts/s²)                 |
+| 6084       | 4      | RW   | Deceleration (10 counts/s²)                 |
+| 60FF       | 4      | RW   | Speed in speed mode (0.1 count/s)           |
+| 221C       | 2      | R    | Actual current (0.01 A)                     |
+| 6098       | 1      | RW   | Homing mode selection                       |
+| 6099:1     | 4      | RW   | Homing high speed (0.1 count/s)             |
+| 6099:2     | 4      | RW   | Homing low speed (0.1 count/s)              |
+| 607C       | 4      | RW   | Home offset position (counts)               |
+| 1017       | 2      | RW   | Heartbeat time (ms)                         |
++------------+--------+------+---------------------------------------------+
+
+================================================================================
+SDO COMMAND ERROR CODES
+================================================================================
+
++------------------+--------------------------------------------------+
+| Code             | Description                                      |
++------------------+--------------------------------------------------+
+| 0503 0000h       | Toggle bit not alternating                       |
+| 0504 0000h       | SDO protocol timeout                             |
+| 0504 0001h       | Invalid/unknown command specifier                |
+| 0504 0002h       | Invalid block size (block mode only)             |
+| 0504 0003h       | Invalid sequence number (block mode only)        |
+| 0504 0004h       | CRC error (block mode only)                      |
+| 0504 0005h       | Out of memory                                    |
+| 0601 0000h       | Access to object not supported                   |
+| 0601 0001h       | Attempt to read write-only object                |
+| 0601 0002h       | Attempt to write read-only object                |
+| 0602 0000h       | Object does not exist in dictionary              |
+| 0604 0041h       | Object cannot be mapped to PDO                   |
+| 0604 0042h       | Number/length of objects exceeds PDO length      |
+| 0604 0043h       | General parameter incompatibility                |
+| 0604 0047h       | General internal incompatibility                 |
+| 0606 0000h       | Access failed due to hardware error              |
+| 0607 0010h       | Data type mismatch (service length mismatch)     |
+| 0607 0012h       | Data type mismatch (service length too high)     |
+| 0607 0013h       | Data type mismatch (service length too low)      |
+| 0609 0011h       | Subindex does not exist                          |
+| 0609 0030h       | Value out of range (write access)                |
+| 0609 0031h       | Value written too high                           |
+| 0609 0032h       | Value written too low                            |
+| 0609 0036h       | Maximum less than minimum                        |
+| 0800 0000h       | General error                                    |
+| 0800 0020h       | Data transfer/storage to application failed      |
+| 0800 0021h       | Data transfer failed (local reason)              |
+| 0800 0022h       | Data transfer failed (device state)              |
+| 0800 0023h       | Object dictionary generation failed              |
++------------------+--------------------------------------------------+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
